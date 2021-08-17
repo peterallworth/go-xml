@@ -827,7 +827,7 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 			{{if .DefaultValue -}}
 			{{if eq .ToType "bool" -}}
 			overlay.{{.FieldName}} = {{.DefaultValue}}
-			{{else}}
+			{{else if slice .ToType 0 1 | ne "*"}}
 			overlay.{{.FieldName}} = {{.ToType}}("{{.DefaultValue}}")
 			{{end -}}
 			{{end -}}
@@ -867,12 +867,12 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 			var layout struct{
 				*T
 				{{- range .Overrides}}
-				{{.FieldName}} *{{.ToType}}`+"`{{.Tag}}`"+`
+				{{.FieldName}} {{.ToType}}`+"`{{.Tag}}`"+`
 				{{end -}}
 			}
 			layout.T = (*T)(t)
 			{{- range .Overrides}}
-			layout.{{.FieldName}} = (*{{.ToType}})(&layout.T.{{.FieldName}})
+			layout.{{.FieldName}} = ({{.ToType}})(t.{{.FieldName}})
 			{{end -}}
 
 			return e.EncodeElement(layout, start)
