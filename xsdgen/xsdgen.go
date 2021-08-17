@@ -704,7 +704,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 		}
 		if el.Plural {
 			base = &ast.ArrayType{Elt: base}
-		} else if el.Optional && !el.Nillable {
+		} else if el.Optional || el.Nillable {
 			base = &ast.StarExpr{X: base}
 		}
 		fields = append(fields, name, base, gen.String(tag))
@@ -719,7 +719,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 				typeName = h.name
 			}
 			fromName := cfg.exprString(el.Type)
-			if el.Optional && !el.Nillable {
+			if el.Optional || el.Nillable {
 				fromName = "*" + fromName
 				typeName = "*" + typeName
 			}
