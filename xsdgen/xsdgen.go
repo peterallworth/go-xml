@@ -704,6 +704,8 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 		}
 		if el.Plural {
 			base = &ast.ArrayType{Elt: base}
+		} else if el.Optional && !el.Nillable {
+			base = &ast.StarExpr{X: base}
 		}
 		fields = append(fields, name, base, gen.String(tag))
 		if el.Default != "" || nonTrivialBuiltin(el.Type) {
@@ -716,10 +718,15 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 				helperTypes = append(helperTypes, xsd.XMLName(h.xsdType))
 				typeName = h.name
 			}
+			fromName := cfg.exprString(el.Type)
+			if el.Optional && !el.Nillable {
+				fromName = "*" + fromName
+				typeName = "*" + typeName
+			}
 			overrides = append(overrides, fieldOverride{
 				DefaultValue: el.Default,
 				FieldName:    name.(*ast.Ident).Name,
-				FromType:     cfg.exprString(el.Type),
+				FromType:     fromName,
 				Tag:          tag,
 				ToType:       typeName,
 				Type:         el.Type,
@@ -812,18 +819,26 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 			var overlay struct{
 				*T
 				{{range .Overrides}}
-				{{.FieldName}} *{{.ToType}} `+"`{{.Tag}}`"+`
+				{{.FieldName}} {{.ToType}} `+"`{{.Tag}}`"+`
 				{{end}}
 			}
 			overlay.T = (*T)(t)
 			{{range .Overrides}}
-			overlay.{{.FieldName}} = (*{{.ToType}})(&overlay.T.{{.FieldName}})
 			{{if .DefaultValue -}}
-			// overlay.{{.FieldName}} = {{.DefaultValue}}
+			{{if eq .ToType "bool" -}}
+			overlay.{{.FieldName}} = {{.DefaultValue}}
+			{{else}}
+			overlay.{{.FieldName}} = {{.ToType}}("{{.DefaultValue}}")
+			{{end -}}
 			{{end -}}
 			{{end}}
-
-			return d.DecodeElement(&overlay, &start)
+			if err := d.DecodeElement(&overlay, &start); err != nil {
+				return err
+			}
+			{{range .Overrides}}
+			t.{{.FieldName}} = ({{.FromType}})(overlay.{{.FieldName}})
+			{{end}}
+			return nil
 		`, data).Decl()
 	if err != nil {
 		return nil, nil, err
