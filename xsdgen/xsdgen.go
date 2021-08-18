@@ -279,9 +279,14 @@ func (cfg *Config) expandComplexTypes(types []xsd.Type) []xsd.Type {
 		index[xsd.XMLName(v)] = i
 	}
 	alltypes := types
+	cfg.subtypes = make(map[xml.Name][]xsd.Type)
 	for _, v := range types {
 		for base := xsd.Base(v); base != nil; base = xsd.Base(base) {
 			xmlname := xsd.XMLName(base)
+			if _, ok := base.(*xsd.ComplexType); ok {
+				fmt.Printf("%s extends %s\n", xsd.XMLName(v), xmlname)
+				cfg.subtypes[xmlname] = append(cfg.subtypes[xmlname], v)
+			}
 			if _, ok := index[xmlname]; !ok {
 				index[xmlname] = len(alltypes)
 				alltypes = append(alltypes, base)
@@ -597,6 +602,13 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 
 	namegen := nameGenerator{cfg, make(map[string]struct{})}
 
+	if t.Abstract {
+		fmt.Println(xsd.XMLName(t), "is abstract with concrete types...")
+		for _, s := range cfg.subtypes[xsd.XMLName(t)] {
+			fmt.Println(xsd.XMLName(s))
+		}
+	}
+
 	if t.Mixed {
 		// For complex types with mixed content models, we must drill
 		// down to the base simple or builtin type to determine the
@@ -719,7 +731,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 				typeName = h.name
 			}
 			fromName := cfg.exprString(el.Type)
-			if el.Optional || el.Nillable {
+			if (el.Optional || el.Nillable) && !el.Plural {
 				fromName = "*" + fromName
 				typeName = "*" + typeName
 			}
