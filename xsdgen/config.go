@@ -44,7 +44,8 @@ type Config struct {
 	allowTypes map[xml.Name]bool
 
 	//TODO: Find a sensible home for this.
-	subtypes map[xml.Name][]xsd.Type
+	subtypes   map[xml.Name][]xsd.Type
+	supertypes map[xml.Name][]xsd.Type
 }
 
 type typeTransform func(xsd.Schema, xsd.Type) xsd.Type
