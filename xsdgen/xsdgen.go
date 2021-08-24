@@ -605,14 +605,8 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 
 	namegen := nameGenerator{cfg, make(map[string]struct{})}
 
-	if t.Abstract {
-		fmt.Println(xsd.XMLName(t), "is abstract with concrete types...")
-		for _, s := range cfg.subtypes[xsd.XMLName(t)] {
-			fmt.Println(xsd.XMLName(s))
-		}
-	}
-
 	if t.Mixed {
+		fmt.Println(xsd.XMLName(t), "is Mixed; Abstract =", t.Abstract)
 		// For complex types with mixed content models, we must drill
 		// down to the base simple or builtin type to determine the
 		// ",chardata" struct field.
@@ -671,6 +665,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	// while not explicitly inherited, do not disappear.
 	switch b := t.Base.(type) {
 	case *xsd.ComplexType:
+		fmt.Println(xsd.XMLName(t), "is restricted complex type; Abstract =", t.Abstract)
 		t.Attributes = mergeAttributes(t, b)
 		hasWildcard := false
 		for _, el := range t.Elements {
@@ -796,6 +791,35 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 			})
 		}
 	}
+
+	if t.Abstract {
+		name := cfg.public(t.Name)
+		//TODO: Generate expr of the appropriate type
+		expr := gen.Abstract(name)
+		s := spec{
+			doc:         t.Doc,
+			name:        name,
+			expr:        expr,
+			xsdType:     t,
+			helperTypes: helperTypes,
+		}
+		if len(overrides) > 0 {
+			methods, err := cfg.genComplexTypeMethods(t, overrides)
+			if err != nil {
+				return result, err
+			}
+			s.methods = append(s.methods, methods...)
+		}
+		result = append(result, s)
+
+		fmt.Println(xsd.XMLName(t), "is abstract named", name, "with concrete types...")
+		for _, s := range cfg.subtypes[xsd.XMLName(t)] {
+			fmt.Println(">>>>>", xsd.XMLName(s))
+		}
+
+		return result, nil
+	}
+
 	expr := gen.Struct(fields...)
 	s := spec{
 		doc:         t.Doc,
