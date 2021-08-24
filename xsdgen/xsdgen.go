@@ -801,15 +801,13 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 			name:        name,
 			expr:        expr,
 			xsdType:     t,
-			helperTypes: helperTypes,
+			helperTypes: helperTypes, // needed?
 		}
-		if len(overrides) > 0 {
-			methods, err := cfg.genComplexTypeMethods(t, overrides)
-			if err != nil {
-				return result, err
-			}
-			s.methods = append(s.methods, methods...)
+		methods, err := cfg.genAbstractTypeMethods(t)
+		if err != nil {
+			return result, err
 		}
+		s.methods = append(s.methods, methods...)
 		result = append(result, s)
 
 		fmt.Println(xsd.XMLName(t), "is abstract named", name, "with concrete types...")
@@ -828,15 +826,69 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 		xsdType:     t,
 		helperTypes: helperTypes,
 	}
-	if len(overrides) > 0 {
-		methods, err := cfg.genComplexTypeMethods(t, overrides)
-		if err != nil {
-			return result, err
-		}
-		s.methods = append(s.methods, methods...)
+	methods, err := cfg.genComplexTypeMethods(t, overrides)
+	if err != nil {
+		return result, err
 	}
+	s.methods = append(s.methods, methods...)
 	result = append(result, s)
 	return result, nil
+}
+
+func (cfg *Config) genAbstractTypeMethods(t *xsd.ComplexType) (methods []*ast.FuncDecl, err error) {
+	var data struct {
+		Subtypes []string
+		Type     string
+	}
+	data.Type = cfg.public(t.Name)
+
+	// For the rare case of an abstract class being derived from another.
+	for _, v := range cfg.supertypes[xsd.XMLName(t)] {
+		isType, err := gen.Func("is"+cfg.public(xsd.XMLName(v))).Receiver("t *"+data.Type).BodyTmpl(" ", nil).Decl()
+		if err != nil {
+			return methods, err
+		}
+		methods = append(methods, isType)
+	}
+
+	for _, v := range cfg.subtypes[xsd.XMLName(t)] {
+		data.Subtypes = append(data.Subtypes, cfg.public(xsd.XMLName(v)))
+	}
+	unmarshal, err := gen.Func("UnmarshalXML").
+		Receiver("t *"+data.Type).
+		Args("d *xml.Decoder", "start xml.StartElement").
+		Returns("error").
+		BodyTmpl(`
+			for _, a := range start.Attr {
+				if a.Name.Local == "type" {
+					parts := strings.SplitN(a.Value, ":", 2)
+					t.Type = parts[len(parts)-1]
+					switch t.Type {
+					{{range .Subtypes}}
+					case "{{.}}":
+						t.Value = &{{.}}{}
+					{{end}}
+					default:
+						return fmt.Errorf("unknown subtype of {{.Type}}: \"%s\"", a.Value)
+					}
+					return d.DecodeElement(t.Value, &start)
+				}
+			}
+			return fmt.Errorf("missing type attribute in {{.Type}}")
+		`, data).Decl()
+	if err != nil {
+		return nil, err
+	}
+	methods = append(methods, unmarshal)
+
+	marshal, err := gen.Func("MarshalXML").
+		Receiver("t *"+data.Type).
+		Args("e *xml.Encoder", "start xml.StartElement").
+		Returns("error").
+		BodyTmpl(`
+			return e.EncodeElement(t.Value, start)
+		`, data).Decl()
+	return append(methods, marshal), err
 }
 
 func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOverride) (methods []*ast.FuncDecl, err error) {
@@ -854,6 +906,11 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 		}
 		methods = append(methods, isType)
 	}
+
+	if len(overrides) == 0 {
+		return methods, nil
+	}
+
 	unmarshal, err := gen.Func("UnmarshalXML").
 		Receiver("t *"+data.Type).
 		Args("d *xml.Decoder", "start xml.StartElement").
