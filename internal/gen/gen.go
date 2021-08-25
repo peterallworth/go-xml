@@ -67,6 +67,27 @@ func ToString(expr ast.Expr) (string, error) {
 	return buf.String(), err
 }
 
+// Abstract creates a struct{} expression for an abstract type of the given name.
+func Abstract(name string) *ast.StructType {
+	fields := new(ast.FieldList)
+	fields.List = append(fields.List, &ast.Field{
+		Names: []*ast.Ident{ast.NewIdent("Type")},
+		Type:  ast.NewIdent("string"),
+	})
+
+	// Construct an interface type with a single isName() method.
+	name = "is" + name
+	method := &ast.Field{}
+	method.Names = []*ast.Ident{&ast.Ident{Name: name, Obj: &ast.Object{Kind: ast.Fun, Name: name, Decl: method}}}
+	method.Type = &ast.FuncType{Params: &ast.FieldList{}}
+
+	fields.List = append(fields.List, &ast.Field{
+		Names: []*ast.Ident{ast.NewIdent("Value")},
+		Type:  &ast.InterfaceType{Methods: &ast.FieldList{List: []*ast.Field{method}}},
+	})
+	return &ast.StructType{Fields: fields}
+}
+
 // Struct creates a struct{} expression. The arguments are a series
 // of name/type/tag tuples. Name must be of type *ast.Ident, type
 // must be of type ast.Expr, and tag must be of type *ast.BasicLit,

@@ -279,9 +279,17 @@ func (cfg *Config) expandComplexTypes(types []xsd.Type) []xsd.Type {
 		index[xsd.XMLName(v)] = i
 	}
 	alltypes := types
+	cfg.subtypes = make(map[xml.Name][]xsd.Type)
+	cfg.supertypes = make(map[xml.Name][]xsd.Type)
 	for _, v := range types {
 		for base := xsd.Base(v); base != nil; base = xsd.Base(base) {
 			xmlname := xsd.XMLName(base)
+			if _, ok := base.(*xsd.ComplexType); ok {
+				vName := xsd.XMLName(v)
+				// fmt.Printf("%s extends %s\n", vName, xmlname)
+				cfg.subtypes[xmlname] = append(cfg.subtypes[xmlname], v)
+				cfg.supertypes[vName] = append(cfg.supertypes[vName], base)
+			}
 			if _, ok := index[xmlname]; !ok {
 				index[xmlname] = len(alltypes)
 				alltypes = append(alltypes, base)
@@ -598,6 +606,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	namegen := nameGenerator{cfg, make(map[string]struct{})}
 
 	if t.Mixed {
+		fmt.Println(xsd.XMLName(t), "is Mixed; Abstract =", t.Abstract)
 		// For complex types with mixed content models, we must drill
 		// down to the base simple or builtin type to determine the
 		// ",chardata" struct field.
@@ -656,6 +665,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	// while not explicitly inherited, do not disappear.
 	switch b := t.Base.(type) {
 	case *xsd.ComplexType:
+		fmt.Println(xsd.XMLName(t), "is restricted complex type; Abstract =", t.Abstract)
 		t.Attributes = mergeAttributes(t, b)
 		hasWildcard := false
 		for _, el := range t.Elements {
@@ -702,9 +712,15 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 				base = builtinExpr(xsd.String)
 			}
 		}
+
+		usePointer := false
 		if el.Plural {
 			base = &ast.ArrayType{Elt: base}
+		} else if _, ok := base.(*ast.ArrayType); (el.Optional || el.Nillable) && !ok {
+			usePointer = true
+			base = &ast.StarExpr{X: base}
 		}
+
 		fields = append(fields, name, base, gen.String(tag))
 		if el.Default != "" || nonTrivialBuiltin(el.Type) {
 			typeName := cfg.exprString(el.Type)
@@ -716,10 +732,15 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 				helperTypes = append(helperTypes, xsd.XMLName(h.xsdType))
 				typeName = h.name
 			}
+			fromName := cfg.exprString(el.Type)
+			if usePointer {
+				fromName = "*" + fromName
+				typeName = "*" + typeName
+			}
 			overrides = append(overrides, fieldOverride{
 				DefaultValue: el.Default,
 				FieldName:    name.(*ast.Ident).Name,
-				FromType:     cfg.exprString(el.Type),
+				FromType:     fromName,
 				Tag:          tag,
 				ToType:       typeName,
 				Type:         el.Type,
@@ -770,6 +791,33 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 			})
 		}
 	}
+
+	if t.Abstract {
+		name := cfg.public(t.Name)
+		//TODO: Generate expr of the appropriate type
+		expr := gen.Abstract(name)
+		s := spec{
+			doc:         t.Doc,
+			name:        name,
+			expr:        expr,
+			xsdType:     t,
+			helperTypes: helperTypes, // needed?
+		}
+		methods, err := cfg.genAbstractTypeMethods(t)
+		if err != nil {
+			return result, err
+		}
+		s.methods = append(s.methods, methods...)
+		result = append(result, s)
+
+		fmt.Println(xsd.XMLName(t), "is abstract named", name, "with concrete types...")
+		for _, s := range cfg.subtypes[xsd.XMLName(t)] {
+			fmt.Println(">>>>>", xsd.XMLName(s))
+		}
+
+		return result, nil
+	}
+
 	expr := gen.Struct(fields...)
 	s := spec{
 		doc:         t.Doc,
@@ -778,24 +826,72 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 		xsdType:     t,
 		helperTypes: helperTypes,
 	}
-	if len(overrides) > 0 {
-		unmarshal, marshal, err := cfg.genComplexTypeMethods(t, overrides)
-		if err != nil {
-			return result, err
-		} else {
-			if unmarshal != nil {
-				s.methods = append(s.methods, unmarshal)
-			}
-			if marshal != nil {
-				s.methods = append(s.methods, marshal)
-			}
-		}
+	methods, err := cfg.genComplexTypeMethods(t, overrides)
+	if err != nil {
+		return result, err
 	}
+	s.methods = append(s.methods, methods...)
 	result = append(result, s)
 	return result, nil
 }
 
-func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOverride) (marshal, unmarshal *ast.FuncDecl, err error) {
+func (cfg *Config) genAbstractTypeMethods(t *xsd.ComplexType) (methods []*ast.FuncDecl, err error) {
+	var data struct {
+		Subtypes []string
+		Type     string
+	}
+	data.Type = cfg.public(t.Name)
+
+	// For the rare case of an abstract class being derived from another.
+	for _, v := range cfg.supertypes[xsd.XMLName(t)] {
+		isType, err := gen.Func("is"+cfg.public(xsd.XMLName(v))).Receiver("t *"+data.Type).BodyTmpl(" ", nil).Decl()
+		if err != nil {
+			return methods, err
+		}
+		methods = append(methods, isType)
+	}
+
+	for _, v := range cfg.subtypes[xsd.XMLName(t)] {
+		data.Subtypes = append(data.Subtypes, cfg.public(xsd.XMLName(v)))
+	}
+	unmarshal, err := gen.Func("UnmarshalXML").
+		Receiver("t *"+data.Type).
+		Args("d *xml.Decoder", "start xml.StartElement").
+		Returns("error").
+		BodyTmpl(`
+			for _, a := range start.Attr {
+				if a.Name.Local == "type" {
+					parts := strings.SplitN(a.Value, ":", 2)
+					t.Type = parts[len(parts)-1]
+					switch t.Type {
+					{{range .Subtypes}}
+					case "{{.}}":
+						t.Value = &{{.}}{}
+					{{end}}
+					default:
+						return fmt.Errorf("unknown subtype of {{.Type}}: \"%s\"", a.Value)
+					}
+					return d.DecodeElement(t.Value, &start)
+				}
+			}
+			return fmt.Errorf("missing type attribute in {{.Type}}")
+		`, data).Decl()
+	if err != nil {
+		return nil, err
+	}
+	methods = append(methods, unmarshal)
+
+	marshal, err := gen.Func("MarshalXML").
+		Receiver("t *"+data.Type).
+		Args("e *xml.Encoder", "start xml.StartElement").
+		Returns("error").
+		BodyTmpl(`
+			return e.EncodeElement(t.Value, start)
+		`, data).Decl()
+	return append(methods, marshal), err
+}
+
+func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOverride) (methods []*ast.FuncDecl, err error) {
 	var data struct {
 		Overrides []fieldOverride
 		Type      string
@@ -803,7 +899,19 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 	data.Overrides = overrides
 	data.Type = cfg.public(t.Name)
 
-	unmarshal, err = gen.Func("UnmarshalXML").
+	for _, v := range cfg.supertypes[xsd.XMLName(t)] {
+		isType, err := gen.Func("is"+cfg.public(xsd.XMLName(v))).Receiver("t *"+data.Type).BodyTmpl(" ", nil).Decl()
+		if err != nil {
+			return methods, err
+		}
+		methods = append(methods, isType)
+	}
+
+	if len(overrides) == 0 {
+		return methods, nil
+	}
+
+	unmarshal, err := gen.Func("UnmarshalXML").
 		Receiver("t *"+data.Type).
 		Args("d *xml.Decoder", "start xml.StartElement").
 		Returns("error").
@@ -812,22 +920,31 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 			var overlay struct{
 				*T
 				{{range .Overrides}}
-				{{.FieldName}} *{{.ToType}} `+"`{{.Tag}}`"+`
+				{{.FieldName}} {{.ToType}} `+"`{{.Tag}}`"+`
 				{{end}}
 			}
 			overlay.T = (*T)(t)
 			{{range .Overrides}}
-			overlay.{{.FieldName}} = (*{{.ToType}})(&overlay.T.{{.FieldName}})
 			{{if .DefaultValue -}}
-			// overlay.{{.FieldName}} = {{.DefaultValue}}
+			{{if eq .ToType "bool" -}}
+			overlay.{{.FieldName}} = {{.DefaultValue}}
+			{{else if slice .ToType 0 1 | ne "*"}}
+			overlay.{{.FieldName}} = {{.ToType}}("{{.DefaultValue}}")
+			{{end -}}
 			{{end -}}
 			{{end}}
-
-			return d.DecodeElement(&overlay, &start)
+			if err := d.DecodeElement(&overlay, &start); err != nil {
+				return err
+			}
+			{{range .Overrides}}
+			t.{{.FieldName}} = ({{.FromType}})(overlay.{{.FieldName}})
+			{{end}}
+			return nil
 		`, data).Decl()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	methods = append(methods, unmarshal)
 
 	// We don't set defaults in MarshalXML; there's no way to distinguish
 	// an intentional zero value from "no value", and the consumer of the
@@ -839,11 +956,11 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 		}
 	}
 	if len(nonDefaultOverrides) == 0 {
-		return nil, unmarshal, nil
+		return methods, nil
 	}
 
 	data.Overrides = nonDefaultOverrides
-	marshal, err = gen.Func("MarshalXML").
+	marshal, err := gen.Func("MarshalXML").
 		Receiver("t *"+data.Type).
 		Args("e *xml.Encoder", "start xml.StartElement").
 		Returns("error").
@@ -852,17 +969,17 @@ func (cfg *Config) genComplexTypeMethods(t *xsd.ComplexType, overrides []fieldOv
 			var layout struct{
 				*T
 				{{- range .Overrides}}
-				{{.FieldName}} *{{.ToType}}`+"`{{.Tag}}`"+`
+				{{.FieldName}} {{.ToType}}`+"`{{.Tag}}`"+`
 				{{end -}}
 			}
 			layout.T = (*T)(t)
 			{{- range .Overrides}}
-			layout.{{.FieldName}} = (*{{.ToType}})(&layout.T.{{.FieldName}})
+			layout.{{.FieldName}} = ({{.ToType}})(t.{{.FieldName}})
 			{{end -}}
 
 			return e.EncodeElement(layout, start)
 		`, data).Decl()
-	return marshal, unmarshal, err
+	return append(methods, marshal), err
 }
 
 func (cfg *Config) genSimpleType(t *xsd.SimpleType) ([]spec, error) {
