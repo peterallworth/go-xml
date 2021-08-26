@@ -606,7 +606,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	namegen := nameGenerator{cfg, make(map[string]struct{})}
 
 	if t.Mixed {
-		fmt.Println(xsd.XMLName(t), "is Mixed; Abstract =", t.Abstract)
+		// fmt.Println(xsd.XMLName(t), "is Mixed; Abstract =", t.Abstract)
 		// For complex types with mixed content models, we must drill
 		// down to the base simple or builtin type to determine the
 		// ",chardata" struct field.
@@ -665,7 +665,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	// while not explicitly inherited, do not disappear.
 	switch b := t.Base.(type) {
 	case *xsd.ComplexType:
-		fmt.Println(xsd.XMLName(t), "is restricted complex type; Abstract =", t.Abstract)
+		// fmt.Println(xsd.XMLName(t), "is restricted complex type; Abstract =", t.Abstract)
 		t.Attributes = mergeAttributes(t, b)
 		hasWildcard := false
 		for _, el := range t.Elements {
@@ -809,12 +809,12 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 		}
 		s.methods = append(s.methods, methods...)
 		result = append(result, s)
-
-		fmt.Println(xsd.XMLName(t), "is abstract named", name, "with concrete types...")
-		for _, s := range cfg.subtypes[xsd.XMLName(t)] {
-			fmt.Println(">>>>>", xsd.XMLName(s))
-		}
-
+		/*
+			fmt.Println(xsd.XMLName(t), "is abstract named", name, "with concrete types...")
+			for _, s := range cfg.subtypes[xsd.XMLName(t)] {
+				fmt.Println(">>>>>", xsd.XMLName(s))
+			}
+		*/
 		return result, nil
 	}
 
