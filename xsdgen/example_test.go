@@ -135,7 +135,7 @@ func ExamplePackageName() {
 	//
 	// package postal
 	//
-	// // May be no more than 10 items long
+	// // Must be exactly 10 items long
 	// type Zipcode string
 }
 
@@ -194,6 +194,9 @@ func ExampleHandleSOAPArrayType() {
 	// 	Id     string `xml:"id,attr,omitempty"`
 	// 	Href   string `xml:"href,attr,omitempty"`
 	// }
+	//
+	// func (t *BoolArray) isArray() {
+	//}
 }
 
 func ExampleSOAPArrayAsSlice() {
@@ -227,6 +230,9 @@ func ExampleSOAPArrayAsSlice() {
 	// import "encoding/xml"
 	//
 	// type BoolArray []bool
+	//
+	// func (t *BoolArray) isArray() {
+	//}
 	//
 	// func (a BoolArray) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 	// 	var output struct {
@@ -296,26 +302,29 @@ func ExampleUseFieldNames() {
 	// 	Author    string    `xml:"http://www.example.com/ author"`
 	// }
 	//
-	// func (t *Book) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
-	// 	type T Book
-	// 	var layout struct {
-	// 		*T
-	// 		Published *xsdDate `xml:"http://www.example.com/ published"`
-	// 	}
-	// 	layout.T = (*T)(t)
-	// 	layout.Published = (*xsdDate)(&layout.T.Published)
-	// 	return e.EncodeElement(layout, start)
-	// }
-	// func (t *Book) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
-	// 	type T Book
-	// 	var overlay struct {
-	// 		*T
-	// 		Published *xsdDate `xml:"http://www.example.com/ published"`
-	// 	}
-	// 	overlay.T = (*T)(t)
-	// 	overlay.Published = (*xsdDate)(&overlay.T.Published)
-	// 	return d.DecodeElement(&overlay, &start)
-	// }
+	//func (t *Book) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	//	type T Book
+	//	var overlay struct {
+	//		*T
+	//		Published xsdDate `xml:"http://www.example.com/ published"`
+	//	}
+	//	overlay.T = (*T)(t)
+	//	if err := d.DecodeElement(&overlay, &start); err != nil {
+	//		return err
+	//	}
+	//	t.Published = (time.Time)(overlay.Published)
+	//	return nil
+	//}
+	//func (t *Book) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
+	//	type T Book
+	//	var layout struct {
+	//		*T
+	//		Published xsdDate `xml:"http://www.example.com/ published"`
+	//	}
+	//	layout.T = (*T)(t)
+	//	layout.Published = (xsdDate)(t.Published)
+	//	return e.EncodeElement(layout, start)
+	//}
 	//
 	// type Library struct {
 	// 	Book []Book `xml:"http://www.example.com/ book"`

@@ -471,6 +471,10 @@ func (cfg *Config) flatten1(t xsd.Type, push func(xsd.Type), depth int) xsd.Type
 			t.Doc = "Must be at least " + strconv.Itoa(t.Restriction.MinLength) + " items long"
 			return t
 		}
+		if t.Restriction.Length != 0 {
+			t.Doc = "Must be exactly " + strconv.Itoa(t.Restriction.Length) + " items long"
+			return t
+		}
 		return t.Base
 	case *xsd.ComplexType:
 		// We can "unpack" a struct if it is extending a simple
@@ -665,7 +669,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	// while not explicitly inherited, do not disappear.
 	switch b := t.Base.(type) {
 	case *xsd.ComplexType:
-		fmt.Println(xsd.XMLName(t), "is restricted complex type; Abstract =", t.Abstract)
+		//fmt.Println(xsd.XMLName(t), "is restricted complex type; Abstract =", t.Abstract)
 		t.Attributes = mergeAttributes(t, b)
 		hasWildcard := false
 		for _, el := range t.Elements {
