@@ -75,3 +75,7 @@ func TestBase64Binary(t *testing.T) {
 func TestSimpleUnion(t *testing.T) {
 	t.Logf("%s\n", testGen(t, "http://example.org/", "testdata/simple-union.xsd"))
 }
+
+func TestImports(t *testing.T) {
+	t.Logf("%s\n", testGen(t, "ns1", "testdata/ns1.xsd"))
+}

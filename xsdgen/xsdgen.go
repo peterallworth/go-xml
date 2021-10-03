@@ -610,7 +610,7 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 	namegen := nameGenerator{cfg, make(map[string]struct{})}
 
 	if t.Mixed {
-		fmt.Println(xsd.XMLName(t), "is Mixed; Abstract =", t.Abstract)
+		//fmt.Println(xsd.XMLName(t), "is Mixed; Abstract =", t.Abstract)
 		// For complex types with mixed content models, we must drill
 		// down to the base simple or builtin type to determine the
 		// ",chardata" struct field.
@@ -698,7 +698,21 @@ func (cfg *Config) genComplexType(t *xsd.ComplexType) ([]spec, error) {
 		if el.Nillable || el.Optional {
 			options = ",omitempty"
 		}
-		tag := fmt.Sprintf(`xml:"%s %s%s"`, el.Name.Space, el.Name.Local, options)
+
+		qualified := false
+		for _, attrAttr := range attr.Attr {
+			if attrAttr.Name.Space == "" && attrAttr.Name.Local == "form" && attrAttr.Value == "qualified" {
+				qualified = true
+			}
+		}
+
+		tag := ""
+		if qualified || t.Name.Space != el.Name.Space {
+			tag = fmt.Sprintf(`xml:"%s %s%s"`, el.Name.Space, el.Name.Local, options)
+		} else {
+			tag := fmt.Sprintf(`xml:"%s%s"`, el.Name.Local, options)
+		}
+
 		base, err := cfg.expr(el.Type)
 		if err != nil {
 			return nil, fmt.Errorf("%s element %s: %v", t.Name.Local, el.Name.Local, err)
